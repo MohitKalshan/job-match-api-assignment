@@ -11,6 +11,7 @@ This README describes only what is currently implemented. As of now:
 - `POST /candidates` — create a candidate profile
 - `POST /jobs` — create a job posting
 - `GET /candidates/:id/recommendations` — ranked job recommendations for a candidate
+- `GET /jobs/:id/recommendations` — ranked best-fit candidates for a job (reverse view)
 - `GET /home` — health check
 - In-memory storage (no database)
 - Docker / Docker Compose setup
@@ -162,6 +163,38 @@ curl "localhost:3000/candidates/<candidate-id>/recommendations?limit=5"
 
 Returns `404` if the candidate doesn't exist, or `400` if `limit` isn't a positive
 integer.
+
+### `GET /jobs/:id/recommendations`
+
+The reverse view: ranked list of best-fit candidates for a job, best match first. Uses
+the same scoring (including the must-have hard filter) and query params as the
+candidate-facing endpoint above — just with the roles swapped.
+
+Query params:
+
+- `limit` (optional, positive integer) — return only the top N results.
+
+```bash
+curl "localhost:3000/jobs/<job-id>/recommendations?limit=5"
+```
+
+```json
+[
+  {
+    "candidateId": "cebb1f5d-66f8-4b1d-9018-83d171536a9a",
+    "name": "Ada Lovelace",
+    "score": 100,
+    "breakdown": {
+      "skills": { "score": 50, "max": 50 },
+      "experience": { "score": 20, "max": 20 },
+      "location": { "score": 15, "max": 15 },
+      "salary": { "score": 15, "max": 15 }
+    }
+  }
+]
+```
+
+Returns `404` if the job doesn't exist, or `400` if `limit` isn't a positive integer.
 
 ## Scoring formula
 

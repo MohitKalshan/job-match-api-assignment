@@ -99,3 +99,24 @@ export function computeJobMatch(candidate: Candidate, job: Job): MatchResult {
     },
   };
 }
+
+// Shared by both recommendation directions: apply the must-have hard filter, score, sort best-first.
+export function rankJobsForCandidate(
+  candidate: Candidate,
+  jobs: Job[],
+): Array<{ job: Job } & MatchResult> {
+  return jobs
+    .filter((job) => hasAllMustHaveSkills(candidate, job))
+    .map((job) => ({ job, ...computeJobMatch(candidate, job) }))
+    .sort((a, b) => b.score - a.score);
+}
+
+export function rankCandidatesForJob(
+  job: Job,
+  candidates: Candidate[],
+): Array<{ candidate: Candidate } & MatchResult> {
+  return candidates
+    .filter((candidate) => hasAllMustHaveSkills(candidate, job))
+    .map((candidate) => ({ candidate, ...computeJobMatch(candidate, job) }))
+    .sort((a, b) => b.score - a.score);
+}

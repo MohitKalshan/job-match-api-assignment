@@ -3,7 +3,7 @@ import { createCandidateSchema } from "../schemas/candidate.js";
 import { recommendationQuerySchema } from "../schemas/recommendation.js";
 import { createCandidate, getCandidateById } from "../store/candidates.js";
 import { listJobs } from "../store/jobs.js";
-import { computeJobMatch, hasAllMustHaveSkills } from "../scoring/job-match.js";
+import { rankJobsForCandidate } from "../scoring/job-match.js";
 import { parseOrRespond } from "../utils/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -32,13 +32,12 @@ candidatesRouter.get(
     const query = parseOrRespond(recommendationQuerySchema, req.query, res);
     if (!query) return;
 
-    const ranked = listJobs()
-      .filter((job) => hasAllMustHaveSkills(candidate, job))
-      .map((job) => {
-        const { score, breakdown } = computeJobMatch(candidate, job);
-        return { jobId: job.id, title: job.title, score, breakdown };
-      })
-      .sort((a, b) => b.score - a.score);
+    const ranked = rankJobsForCandidate(candidate, listJobs()).map(({ job, score, breakdown }) => ({
+      jobId: job.id,
+      title: job.title,
+      score,
+      breakdown,
+    }));
 
     res.json(query.limit ? ranked.slice(0, query.limit) : ranked);
   }),

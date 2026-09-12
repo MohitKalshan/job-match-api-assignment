@@ -12,3 +12,7 @@ export function createCandidate(data: CreateCandidate): Candidate {
 export function getCandidateById(id: string): Candidate | undefined {
   return candidates.get(id);
 }
+
+export function listCandidates(): Candidate[] {
+  return Array.from(candidates.values());
+}

@@ -12,3 +12,7 @@ export function createJob(data: CreateJob): Job {
 export function listJobs(): Job[] {
   return Array.from(jobs.values());
 }
+
+export function getJobById(id: string): Job | undefined {
+  return jobs.get(id);
+}

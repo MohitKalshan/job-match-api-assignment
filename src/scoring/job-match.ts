@@ -7,7 +7,7 @@ import type { MatchResult } from "../types/match.js";
 export const SCORE_WEIGHTS = {
   skills: { total: 50, mustHave: 35, niceToHave: 15 },
   experience: 20,
-  location: 15,
+  location: { total: 15, remoteAllowed: 10 },
   salary: 15,
 } as const;
 
@@ -58,14 +58,16 @@ function scoreExperience(candidate: Candidate, job: Job): number {
   return (candidate.yearsOfExperience / job.minYearsExperience) * SCORE_WEIGHTS.experience;
 }
 
-// Binary: remote jobs skip location entirely; otherwise it's an exact string match.
+// Three tiers: exact location match ranks above remote-allowed, which ranks above a mismatch.
 function scoreLocation(candidate: Candidate, job: Job): number {
-  if (job.remoteAllowed) {
-    return SCORE_WEIGHTS.location;
+  const isExactMatch = normalizeSkill(candidate.location) === normalizeSkill(job.location);
+  if (isExactMatch) {
+    return SCORE_WEIGHTS.location.total;
   }
-  return normalizeSkill(candidate.location) === normalizeSkill(job.location)
-    ? SCORE_WEIGHTS.location
-    : 0;
+  if (job.remoteAllowed) {
+    return SCORE_WEIGHTS.location.remoteAllowed;
+  }
+  return 0;
 }
 
 // Full credit at or under the range max; decays linearly to zero 50% over max.
@@ -90,7 +92,7 @@ export function computeJobMatch(candidate: Candidate, job: Job): MatchResult {
     breakdown: {
       skills: { score: skills, max: SCORE_WEIGHTS.skills.total },
       experience: { score: experience, max: SCORE_WEIGHTS.experience },
-      location: { score: location, max: SCORE_WEIGHTS.location },
+      location: { score: location, max: SCORE_WEIGHTS.location.total },
       salary: { score: salary, max: SCORE_WEIGHTS.salary },
     },
   };

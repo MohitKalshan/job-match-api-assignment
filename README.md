@@ -200,18 +200,27 @@ weighted factors. Implementation: `src/scoring/job-match.ts`.
     one; a job with no must-haves listed, or no nice-to-haves listed, awards full
     credit for that sub-category rather than penalizing the candidate for something
     the job never asked for.
-- **Experience (20 pts)** is graded, not binary: meeting or exceeding the minimum is
-  full credit, but a candidate below the minimum still gets partial credit
-  proportional to how close they are (half the required experience = half the points).
-  A candidate at 4 of 5 required years is a much better match than one at 1 of 5, and
-  the score should reflect that instead of just failing both.
-- **Location (15 pts)** is deliberately binary and the lightest of the two "hard"
-  factors: a `remoteAllowed` job makes location irrelevant (full credit automatically),
-  and otherwise it's an exact string match on `location` or nothing. There's no
-  location/geo data in the model to support a meaningful partial match (e.g. "same
-  metro area"), so a fuzzy score there would just be noise. It's weighted below skills
-  and experience because, in practice, remote-friendliness is common enough that this
-  factor doesn't discriminate between candidates as often as the other two.
+- **Experience (20 pts) is penalized, not gated** — deliberately different treatment
+  from must-have skills, which do exclude a job outright. The distinction: a missing
+  must-have skill is usually a hard capability gap (you either know the tool or you
+  don't), whereas `minYearsExperience` is a proxy the job poster picked, not an
+  objective cutoff — a candidate at 4 of 5 required years is realistically employable
+  and would never see the listing under a hard gate, which is a worse outcome than
+  showing it lower-ranked. So experience is graded: meeting or exceeding the minimum is
+  full credit, and below it, credit scales proportionally to how close the candidate is
+  (half the required experience = half the points) rather than dropping to zero.
+- **Location (15 pts) has three tiers, not two.** An exact match on `location` is the
+  strongest signal (15 pts, full credit) — the candidate can take the job with zero
+  friction. `remoteAllowed` on a non-matching location is real but weaker (10 pts): the
+  job is still open to them, but "the employer will accept remote" isn't the same
+  guarantee as "the candidate is already there" (time zone overlap, occasional on-site
+  expectations, relocation preference, etc. are all still open questions). A mismatch
+  with no remote option scores zero. Exact match wins even when a job is also
+  `remoteAllowed`, since it's the strictly better outcome. There's no location/geo data
+  in the model to support a finer-grained match (e.g. "same metro area"), so a fuzzier
+  score there would just be noise. It's weighted below skills and experience because,
+  in practice, remote-friendliness is common enough that this factor doesn't
+  discriminate between candidates as often as the other two.
 - **Salary (15 pts)** is asymmetric on purpose: if the candidate's expected salary is
   at or under the job's budget (`salaryRange.max`), that's full credit — including
   cases where the expectation is below the range minimum, since that's a bonus for the

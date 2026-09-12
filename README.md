@@ -140,9 +140,17 @@ Ranked list of jobs for a candidate, best match first.
 Query params:
 
 - `limit` (optional, positive integer) — return only the top N results.
+- `weightSkills`, `weightExperience`, `weightLocation`, `weightSalary` (optional,
+  non-negative numbers) — override the default point budget for that factor (see
+  "Scoring formula" below for the defaults). Any factor left unset keeps its default;
+  the four don't need to add up to 100 — the resulting `score` and each breakdown
+  `max` simply reflect whatever budget you passed in.
 
 ```bash
 curl "localhost:3000/candidates/<candidate-id>/recommendations?limit=5"
+
+# weight experience much more heavily than the default
+curl "localhost:3000/candidates/<candidate-id>/recommendations?weightSkills=10&weightExperience=80&weightLocation=5&weightSalary=5"
 ```
 
 ```json
@@ -170,9 +178,8 @@ The reverse view: ranked list of best-fit candidates for a job, best match first
 the same scoring (including the must-have hard filter) and query params as the
 candidate-facing endpoint above — just with the roles swapped.
 
-Query params:
-
-- `limit` (optional, positive integer) — return only the top N results.
+Query params: same as above (`limit`, `weightSkills`, `weightExperience`,
+`weightLocation`, `weightSalary`).
 
 ```bash
 curl "localhost:3000/jobs/<job-id>/recommendations?limit=5"
@@ -223,7 +230,17 @@ weighted factors. Implementation: `src/scoring/job-match.ts`.
 | Location   | 15         | Whether the candidate can actually take the job             |
 | Salary     | 15         | Whether the job's budget covers the candidate's expectation |
 
-**Why these weights:**
+**These four totals are configurable**, via `weightSkills` / `weightExperience` /
+`weightLocation` / `weightSalary` query params on both recommendation endpoints (see
+above) — 50/20/15/15 are just the defaults, not hardcoded. The must-have hard filter
+itself is not configurable (it's a binary gate, not a point value), but the internal
+must-have/nice-to-have split within `skills` and the exact-match/remote split within
+`location` scale proportionally with whatever total you pass — e.g. `weightSkills=100`
+still gives must-have 70% of that budget and nice-to-have 30%, matching the 35/15
+default ratio, so overriding the top-level weight never requires also specifying the
+sub-split. Implementation: `resolveWeights` in `src/scoring/job-match.ts`.
+
+**Why these weights (the defaults):**
 
 The 50/20/15/15 split isn't derived from any formula — it's a judgment call about
 which factors are _capability_ questions versus _fit_ questions, ranked by how much

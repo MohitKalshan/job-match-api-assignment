@@ -1,15 +1,56 @@
 import { SkillPriority } from "../enums/skill-priority.js";
 import type { Candidate } from "../types/candidate.js";
 import type { Job } from "../types/job.js";
-import type { MatchResult } from "../types/match.js";
+import type { MatchResult, ScoreWeightOverrides, ScoreWeights } from "../types/match.js";
 
-// Weight rationale documented in README.md ("Scoring formula").
-export const SCORE_WEIGHTS = {
-  skills: { total: 50, mustHave: 35, niceToHave: 15 },
+// Default point budget and sub-category ratios. Rationale documented in README.md ("Scoring formula").
+const DEFAULT_WEIGHTS = {
+  skills: 50,
   experience: 20,
-  location: { total: 15, remoteAllowed: 10 },
+  location: 15,
   salary: 15,
 } as const;
+
+// A caller-supplied `skills`/`location` total is split into sub-categories using these
+// same proportions as the defaults (must-have:nice-to-have 7:3, exact:remote 3:2),
+// so overriding the top-level weight doesn't require also specifying the split.
+const SKILLS_MUST_HAVE_SHARE = 35 / 50;
+const LOCATION_REMOTE_SHARE = 10 / 15;
+
+export function resolveWeights(overrides: ScoreWeightOverrides = {}): ScoreWeights {
+  const skills = overrides.skills ?? DEFAULT_WEIGHTS.skills;
+  const location = overrides.location ?? DEFAULT_WEIGHTS.location;
+
+  return {
+    skills: {
+      total: skills,
+      mustHave: skills * SKILLS_MUST_HAVE_SHARE,
+      niceToHave: skills * (1 - SKILLS_MUST_HAVE_SHARE),
+    },
+    experience: overrides.experience ?? DEFAULT_WEIGHTS.experience,
+    location: {
+      total: location,
+      remoteAllowed: location * LOCATION_REMOTE_SHARE,
+    },
+    salary: overrides.salary ?? DEFAULT_WEIGHTS.salary,
+  };
+}
+
+export interface WeightQueryParams {
+  weightSkills?: number;
+  weightExperience?: number;
+  weightLocation?: number;
+  weightSalary?: number;
+}
+
+export function weightOverridesFromQuery(query: WeightQueryParams): ScoreWeightOverrides {
+  return {
+    skills: query.weightSkills,
+    experience: query.weightExperience,
+    location: query.weightLocation,
+    salary: query.weightSalary,
+  };
+}
 
 function normalizeSkill(skill: string): string {
   return skill.trim().toLowerCase();
@@ -20,6 +61,7 @@ function toSkillSet(skills: string[]): Set<string> {
 }
 
 // Hard filter, applied before scoring: a missing must-have disqualifies the job entirely.
+// Not weight-configurable — must-have is a hard requirement regardless of point budget.
 export function hasAllMustHaveSkills(candidate: Candidate, job: Job): boolean {
   const candidateSkills = toSkillSet(candidate.skills);
   return job.requiredSkills
@@ -28,74 +70,78 @@ export function hasAllMustHaveSkills(candidate: Candidate, job: Job): boolean {
 }
 
 // Only called for jobs that already passed hasAllMustHaveSkills, so mustHaveScore is always full here.
-function scoreSkills(candidate: Candidate, job: Job): number {
+function scoreSkills(candidate: Candidate, job: Job, weights: ScoreWeights): number {
   const candidateSkills = toSkillSet(candidate.skills);
   const mustHaves = job.requiredSkills.filter((s) => s.priority === SkillPriority.MustHave);
   const niceToHaves = job.requiredSkills.filter((s) => s.priority === SkillPriority.NiceToHave);
 
   const mustHaveScore =
     mustHaves.length === 0
-      ? SCORE_WEIGHTS.skills.mustHave
+      ? weights.skills.mustHave
       : (mustHaves.filter((s) => candidateSkills.has(normalizeSkill(s.skill))).length /
           mustHaves.length) *
-        SCORE_WEIGHTS.skills.mustHave;
+        weights.skills.mustHave;
 
   const niceToHaveScore =
     niceToHaves.length === 0
-      ? SCORE_WEIGHTS.skills.niceToHave
+      ? weights.skills.niceToHave
       : (niceToHaves.filter((s) => candidateSkills.has(normalizeSkill(s.skill))).length /
           niceToHaves.length) *
-        SCORE_WEIGHTS.skills.niceToHave;
+        weights.skills.niceToHave;
 
   return mustHaveScore + niceToHaveScore;
 }
 
 // Below the minimum, credit scales linearly rather than dropping straight to zero.
-function scoreExperience(candidate: Candidate, job: Job): number {
+function scoreExperience(candidate: Candidate, job: Job, weights: ScoreWeights): number {
   if (job.minYearsExperience <= 0 || candidate.yearsOfExperience >= job.minYearsExperience) {
-    return SCORE_WEIGHTS.experience;
+    return weights.experience;
   }
-  return (candidate.yearsOfExperience / job.minYearsExperience) * SCORE_WEIGHTS.experience;
+  return (candidate.yearsOfExperience / job.minYearsExperience) * weights.experience;
 }
 
 // Three tiers: exact location match ranks above remote-allowed, which ranks above a mismatch.
-function scoreLocation(candidate: Candidate, job: Job): number {
+function scoreLocation(candidate: Candidate, job: Job, weights: ScoreWeights): number {
   const isExactMatch = normalizeSkill(candidate.location) === normalizeSkill(job.location);
   if (isExactMatch) {
-    return SCORE_WEIGHTS.location.total;
+    return weights.location.total;
   }
   if (job.remoteAllowed) {
-    return SCORE_WEIGHTS.location.remoteAllowed;
+    return weights.location.remoteAllowed;
   }
   return 0;
 }
 
 // Ramps from 0 (max at or below expectation) to full credit once max is 20%+ above expectation.
-function scoreSalary(candidate: Candidate, job: Job): number {
+function scoreSalary(candidate: Candidate, job: Job, weights: ScoreWeights): number {
   const { expectedSalary } = candidate;
   if (expectedSalary <= 0) {
-    return SCORE_WEIGHTS.salary;
+    return weights.salary;
   }
 
   const COMFORTABLE_MARGIN = 0.2;
   const marginRatio = (job.salaryRange.max - expectedSalary) / expectedSalary;
   const normalized = Math.min(Math.max(marginRatio, 0), COMFORTABLE_MARGIN) / COMFORTABLE_MARGIN;
-  return SCORE_WEIGHTS.salary * normalized;
+  return weights.salary * normalized;
 }
 
-export function computeJobMatch(candidate: Candidate, job: Job): MatchResult {
-  const skills = Math.round(scoreSkills(candidate, job));
-  const experience = Math.round(scoreExperience(candidate, job));
-  const location = Math.round(scoreLocation(candidate, job));
-  const salary = Math.round(scoreSalary(candidate, job));
+export function computeJobMatch(
+  candidate: Candidate,
+  job: Job,
+  weights: ScoreWeights = resolveWeights(),
+): MatchResult {
+  const skills = Math.round(scoreSkills(candidate, job, weights));
+  const experience = Math.round(scoreExperience(candidate, job, weights));
+  const location = Math.round(scoreLocation(candidate, job, weights));
+  const salary = Math.round(scoreSalary(candidate, job, weights));
 
   return {
     score: skills + experience + location + salary,
     breakdown: {
-      skills: { score: skills, max: SCORE_WEIGHTS.skills.total },
-      experience: { score: experience, max: SCORE_WEIGHTS.experience },
-      location: { score: location, max: SCORE_WEIGHTS.location.total },
-      salary: { score: salary, max: SCORE_WEIGHTS.salary },
+      skills: { score: skills, max: Math.round(weights.skills.total) },
+      experience: { score: experience, max: Math.round(weights.experience) },
+      location: { score: location, max: Math.round(weights.location.total) },
+      salary: { score: salary, max: Math.round(weights.salary) },
     },
   };
 }
@@ -104,19 +150,21 @@ export function computeJobMatch(candidate: Candidate, job: Job): MatchResult {
 export function rankJobsForCandidate(
   candidate: Candidate,
   jobs: Job[],
+  weights: ScoreWeights = resolveWeights(),
 ): Array<{ job: Job } & MatchResult> {
   return jobs
     .filter((job) => hasAllMustHaveSkills(candidate, job))
-    .map((job) => ({ job, ...computeJobMatch(candidate, job) }))
+    .map((job) => ({ job, ...computeJobMatch(candidate, job, weights) }))
     .sort((a, b) => b.score - a.score);
 }
 
 export function rankCandidatesForJob(
   job: Job,
   candidates: Candidate[],
+  weights: ScoreWeights = resolveWeights(),
 ): Array<{ candidate: Candidate } & MatchResult> {
   return candidates
     .filter((candidate) => hasAllMustHaveSkills(candidate, job))
-    .map((candidate) => ({ candidate, ...computeJobMatch(candidate, job) }))
+    .map((candidate) => ({ candidate, ...computeJobMatch(candidate, job, weights) }))
     .sort((a, b) => b.score - a.score);
 }

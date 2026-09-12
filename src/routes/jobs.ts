@@ -3,7 +3,11 @@ import { createJobSchema } from "../schemas/job.js";
 import { recommendationQuerySchema } from "../schemas/recommendation.js";
 import { createJob, getJobById } from "../store/jobs.js";
 import { listCandidates } from "../store/candidates.js";
-import { rankCandidatesForJob } from "../scoring/job-match.js";
+import {
+  rankCandidatesForJob,
+  resolveWeights,
+  weightOverridesFromQuery,
+} from "../scoring/job-match.js";
 import { parseOrRespond } from "../utils/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -32,7 +36,8 @@ jobsRouter.get(
     const query = parseOrRespond(recommendationQuerySchema, req.query, res);
     if (!query) return;
 
-    const ranked = rankCandidatesForJob(job, listCandidates()).map(
+    const weights = resolveWeights(weightOverridesFromQuery(query));
+    const ranked = rankCandidatesForJob(job, listCandidates(), weights).map(
       ({ candidate, score, breakdown }) => ({
         candidateId: candidate.id,
         name: candidate.name,

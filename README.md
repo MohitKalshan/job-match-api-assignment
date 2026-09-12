@@ -192,6 +192,30 @@ weighted factors. Implementation: `src/scoring/job-match.ts`.
 
 **Why these weights:**
 
+The 50/20/15/15 split isn't derived from any formula — it's a judgment call about
+which factors are _capability_ questions versus _fit_ questions, ranked by how much
+each one should move the needle:
+
+1. **Skills (50) outranks everything else combined** because it answers "can this
+   candidate do the job at all," which is qualitatively different from the other three
+   — those are all "would this particular arrangement work," not "is this person
+   capable." A candidate who's a perfect salary/location/experience match but is
+   missing the core skills isn't a good recommendation; the reverse (strong skills,
+   imperfect logistics) usually still is.
+2. **Experience (20) outranks location and salary (15 each)** because it's the closest
+   thing to a second capability signal — "has this person done enough of this work" —
+   even though (per the reasoning below) it's graded rather than gated. It still isn't
+   weighted as heavily as skills because `minYearsExperience` is a blunter proxy: two
+   candidates who both clear the bar aren't meaningfully differentiated by _how much_
+   they clear it, whereas two candidates' skill sets can differ enormously.
+3. **Location and salary are tied at 15** because they're both pure logistics/fit
+   questions rather than capability questions, and neither is obviously more
+   consequential than the other in general — which one matters more in practice
+   depends heavily on the specific candidate and job, so there's no principled reason
+   to rank one above the other by default.
+
+Per-factor detail:
+
 - **Skills is the largest single factor (50/100)** because it's the most direct signal
   of whether a candidate can actually do the job — everything else (experience,
   location, salary) is a fit question, not a capability question.

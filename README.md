@@ -165,8 +165,23 @@ integer.
 
 ## Scoring formula
 
-Each candidate-job pair gets a score out of 100, broken into four weighted factors.
-Implementation: `src/scoring/job-match.ts`.
+Recommendations run in two stages: a hard filter, then point-based scoring.
+
+**Hard filter — must-have skills.** A job that requires a must-have skill the candidate
+doesn't have is excluded from the results entirely, no matter how well everything else
+matches. This isn't a scoring penalty; the job never appears. Rationale: a "must-have"
+is a hard requirement by definition — a high salary/experience/location fit doesn't
+make a candidate qualified for a skill they don't have. Implementation:
+`hasAllMustHaveSkills` in `src/scoring/job-match.ts`, applied as a `.filter()` before
+`computeJobMatch` runs.
+
+One consequence: since every job that survives the filter already has 100% must-have
+coverage, the 35 must-have points described below are effectively a guaranteed baseline
+for any job in the results — the visible variation in the skills score comes from
+nice-to-have coverage (0–15 points on top of that baseline).
+
+Each surviving candidate-job pair then gets a score out of 100, broken into four
+weighted factors. Implementation: `src/scoring/job-match.ts`.
 
 | Factor     | Max points | What it measures                                            |
 | ---------- | ---------- | ----------------------------------------------------------- |

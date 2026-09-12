@@ -15,9 +15,21 @@ function normalizeSkill(skill: string): string {
   return skill.trim().toLowerCase();
 }
 
-// A category with no required skills awards full credit for that category rather than penalizing.
+function toSkillSet(skills: string[]): Set<string> {
+  return new Set(skills.map(normalizeSkill));
+}
+
+// Hard filter, applied before scoring: a missing must-have disqualifies the job entirely.
+export function hasAllMustHaveSkills(candidate: Candidate, job: Job): boolean {
+  const candidateSkills = toSkillSet(candidate.skills);
+  return job.requiredSkills
+    .filter((s) => s.priority === SkillPriority.MustHave)
+    .every((s) => candidateSkills.has(normalizeSkill(s.skill)));
+}
+
+// Only called for jobs that already passed hasAllMustHaveSkills, so mustHaveScore is always full here.
 function scoreSkills(candidate: Candidate, job: Job): number {
-  const candidateSkills = new Set(candidate.skills.map(normalizeSkill));
+  const candidateSkills = toSkillSet(candidate.skills);
   const mustHaves = job.requiredSkills.filter((s) => s.priority === SkillPriority.MustHave);
   const niceToHaves = job.requiredSkills.filter((s) => s.priority === SkillPriority.NiceToHave);
 

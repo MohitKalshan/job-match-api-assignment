@@ -3,7 +3,7 @@ import { createCandidateSchema } from "../schemas/candidate.js";
 import { recommendationQuerySchema } from "../schemas/recommendation.js";
 import { createCandidate, getCandidateById } from "../store/candidates.js";
 import { listJobs } from "../store/jobs.js";
-import { computeJobMatch } from "../scoring/job-match.js";
+import { computeJobMatch, hasAllMustHaveSkills } from "../scoring/job-match.js";
 import { parseOrRespond } from "../utils/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -33,6 +33,7 @@ candidatesRouter.get(
     if (!query) return;
 
     const ranked = listJobs()
+      .filter((job) => hasAllMustHaveSkills(candidate, job))
       .map((job) => {
         const { score, breakdown } = computeJobMatch(candidate, job);
         return { jobId: job.id, title: job.title, score, breakdown };

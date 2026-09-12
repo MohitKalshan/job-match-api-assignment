@@ -1,17 +1,18 @@
 import { Router } from "express";
-import { z } from "zod";
 import { createJobSchema } from "../schemas/job.js";
 import { createJob } from "../store/jobs.js";
+import { parseOrRespond } from "../utils/validate.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const jobsRouter = Router();
 
-jobsRouter.post("/", (req, res) => {
-  const result = createJobSchema.safeParse(req.body);
-  if (!result.success) {
-    res.status(400).json({ error: z.flattenError(result.error) });
-    return;
-  }
+jobsRouter.post(
+  "/",
+  asyncHandler(async (req, res) => {
+    const data = parseOrRespond(createJobSchema, req.body, res);
+    if (!data) return;
 
-  const job = createJob(result.data);
-  res.status(201).json(job);
-});
+    const job = createJob(data);
+    res.status(201).json(job);
+  }),
+);

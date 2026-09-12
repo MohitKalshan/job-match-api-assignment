@@ -8,3 +8,7 @@ export function createJob(data: CreateJob): Job {
   jobs.set(job.id, job);
   return job;
 }
+
+export function listJobs(): Job[] {
+  return Array.from(jobs.values());
+}

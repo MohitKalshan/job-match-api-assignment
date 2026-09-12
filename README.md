@@ -10,13 +10,14 @@ This README describes only what is currently implemented. As of now:
 - Data models for `Candidate` and `Job` (Zod schemas + inferred types)
 - `POST /candidates` — create a candidate profile
 - `POST /jobs` — create a job posting
+- `GET /candidates/:id/recommendations` — ranked job recommendations for a candidate
 - `GET /home` — health check
 - In-memory storage (no database)
 - Docker / Docker Compose setup
 - Prettier formatting
 
-**Not yet implemented:** candidate-job matching/scoring. There is no scoring formula in the
-codebase yet, so it isn't documented here — it will be added once that feature is built.
+**Not yet implemented:** `GET`/list/update/delete for candidates and jobs, persistence
+beyond process memory, and auth.
 
 ## Tech stack
 
@@ -130,3 +131,79 @@ curl -X POST localhost:3000/jobs \
 Returns `201` with the created job (including a generated `id`), or `400` with Zod
 field errors if the payload is invalid (e.g. `salaryRange.min > salaryRange.max`, or an
 invalid `priority`).
+
+### `GET /candidates/:id/recommendations`
+
+Ranked list of jobs for a candidate, best match first.
+
+Query params:
+
+- `limit` (optional, positive integer) — return only the top N results.
+
+```bash
+curl "localhost:3000/candidates/<candidate-id>/recommendations?limit=5"
+```
+
+```json
+[
+  {
+    "jobId": "023fbc7c-392d-4f65-bde7-dc00cc791da6",
+    "title": "Backend Engineer",
+    "score": 71,
+    "breakdown": {
+      "skills": { "score": 35, "max": 50 },
+      "experience": { "score": 8, "max": 20 },
+      "location": { "score": 15, "max": 15 },
+      "salary": { "score": 13, "max": 15 }
+    }
+  }
+]
+```
+
+Returns `404` if the candidate doesn't exist, or `400` if `limit` isn't a positive
+integer.
+
+## Scoring formula
+
+Each candidate-job pair gets a score out of 100, broken into four weighted factors.
+Implementation: `src/scoring/job-match.ts`.
+
+| Factor     | Max points | What it measures                                            |
+| ---------- | ---------- | ----------------------------------------------------------- |
+| Skills     | 50         | Coverage of the job's must-have and nice-to-have skills     |
+| Experience | 20         | Candidate's years of experience vs. the job's minimum       |
+| Location   | 15         | Whether the candidate can actually take the job             |
+| Salary     | 15         | Whether the job's budget covers the candidate's expectation |
+
+**Why these weights:**
+
+- **Skills is the largest single factor (50/100)** because it's the most direct signal
+  of whether a candidate can actually do the job — everything else (experience,
+  location, salary) is a fit question, not a capability question.
+  - Within skills, **must-have coverage (35 pts) outweighs nice-to-have coverage (15
+    pts)**. Missing a "must-have" skill should hurt a lot more than missing an optional
+    one; a job with no must-haves listed, or no nice-to-haves listed, awards full
+    credit for that sub-category rather than penalizing the candidate for something
+    the job never asked for.
+- **Experience (20 pts)** is graded, not binary: meeting or exceeding the minimum is
+  full credit, but a candidate below the minimum still gets partial credit
+  proportional to how close they are (half the required experience = half the points).
+  A candidate at 4 of 5 required years is a much better match than one at 1 of 5, and
+  the score should reflect that instead of just failing both.
+- **Location (15 pts)** is deliberately binary and the lightest of the two "hard"
+  factors: a `remoteAllowed` job makes location irrelevant (full credit automatically),
+  and otherwise it's an exact string match on `location` or nothing. There's no
+  location/geo data in the model to support a meaningful partial match (e.g. "same
+  metro area"), so a fuzzy score there would just be noise. It's weighted below skills
+  and experience because, in practice, remote-friendliness is common enough that this
+  factor doesn't discriminate between candidates as often as the other two.
+- **Salary (15 pts)** is asymmetric on purpose: if the candidate's expected salary is
+  at or under the job's budget (`salaryRange.max`), that's full credit — including
+  cases where the expectation is below the range minimum, since that's a bonus for the
+  employer, not a mismatch. Above the max, credit decays linearly to zero once the
+  candidate is asking for 50% more than the top of the range, so a candidate slightly
+  over budget still scores reasonably (they might be negotiable) while someone wildly
+  over budget scores near zero.
+
+All four sub-scores are rounded to the nearest integer before summing, so the
+`breakdown` values always add up to the displayed `score`.

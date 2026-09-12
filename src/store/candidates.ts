@@ -8,3 +8,7 @@ export function createCandidate(data: CreateCandidate): Candidate {
   candidates.set(candidate.id, candidate);
   return candidate;
 }
+
+export function getCandidateById(id: string): Candidate | undefined {
+  return candidates.get(id);
+}

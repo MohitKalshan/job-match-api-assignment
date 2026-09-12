@@ -34,12 +34,21 @@ beyond process memory, and auth.
 ```
 src/
   enums/       TypeScript enums (e.g. SkillPriority)
-  schemas/     Zod validation schemas
-  types/       TypeScript types inferred from schemas
-  store/       In-memory data stores
-  routes/      Express route handlers
-  index.ts     App entry point
+  schemas/     Zod validation schemas — the boundary, validated once
+  types/       Types inferred from schemas, plus the store contracts
+  scoring/     Match scoring — pure functions, no Express, no I/O
+  store/       In-memory store implementations
+  routes/      Express route handlers (router factories taking their stores)
+  middleware/  404 and the single error handler
+  errors/      HttpError and its subclasses
+  utils/       respond() envelope builder, asyncHandler
+  app.ts       createApp(deps) — builds the app without binding a port
+  index.ts     Composition root: picks concrete stores, then listens
 ```
+
+Dependencies point inward. `scoring/` knows nothing about Express, and the routers
+receive their stores rather than importing concretes, so the app can be built over test
+doubles via `createApp`.
 
 ## Running locally
 
@@ -81,13 +90,45 @@ docker compose down
 
 ## API
 
+### Response format
+
+Every endpoint returns the same three fields, on success and on failure alike:
+
+```jsonc
+{
+  "statusCode": 200, // mirrors the HTTP status
+  "data": [], // ALWAYS an array
+  "message": "ok", // human-readable summary
+}
+```
+
+`data` is always an array. A single created entity comes back as a one-element array,
+and an error comes back as an empty one — so a client can use the same parser for every
+response. Validation failures are the one case where `data` is populated on an error: it
+carries one `{ field, message }` object per problem.
+
+```jsonc
+// 400
+{
+  "statusCode": 400,
+  "data": [{ "field": "expectedSalary", "message": "Invalid input: expected number, received undefined" }],
+  "message": "Validation failed"
+}
+
+// 404
+{ "statusCode": 404, "data": [], "message": "Candidate not found" }
+```
+
+A `500` never leaks internals — the body is always `"Something went wrong"`, with the
+real error logged server-side.
+
 ### `GET /home`
 
 Health check.
 
 ```bash
 curl localhost:3000/home
-# {"status":"ok"}
+# {"statusCode":200,"data":[],"message":"ok"}
 ```
 
 ### `POST /candidates`
@@ -106,8 +147,25 @@ curl -X POST localhost:3000/candidates \
   }'
 ```
 
-Returns `201` with the created candidate (including a generated `id`), or `400` with
-Zod field errors if the payload is invalid.
+Returns `201` with the created candidate (including a generated `id`) as the single
+element of `data`, or `400` with per-field errors if the payload is invalid.
+
+```json
+{
+  "statusCode": 201,
+  "data": [
+    {
+      "id": "cebb1f5d-66f8-4b1d-9018-83d171536a9a",
+      "name": "Ada Lovelace",
+      "skills": ["TypeScript", "Math"],
+      "yearsOfExperience": 5,
+      "location": "Remote",
+      "expectedSalary": 120000
+    }
+  ],
+  "message": "Candidate created"
+}
+```
 
 ### `POST /jobs`
 
@@ -129,9 +187,9 @@ curl -X POST localhost:3000/jobs \
   }'
 ```
 
-Returns `201` with the created job (including a generated `id`), or `400` with Zod
-field errors if the payload is invalid (e.g. `salaryRange.min > salaryRange.max`, or an
-invalid `priority`).
+Returns `201` with the created job (including a generated `id`) as the single element of
+`data`, or `400` with per-field errors if the payload is invalid (e.g.
+`salaryRange.min > salaryRange.max`, or an invalid `priority`).
 
 ### `GET /candidates/:id/recommendations`
 
@@ -139,7 +197,9 @@ Ranked list of jobs for a candidate, best match first.
 
 Query params:
 
-- `limit` (optional, positive integer) — return only the top N results.
+- `limit` (optional, positive integer) — return only the top N results. **Defaults to
+  `20`, capped at `100`**; a larger value is rejected with `400`. The cap is deliberate:
+  an uncapped list endpoint dumps the whole store.
 - `weightSkills`, `weightExperience`, `weightLocation`, `weightSalary` (optional,
   non-negative numbers) — override the default point budget for that factor (see
   "Scoring formula" below for the defaults). Any factor left unset keeps its default;
@@ -154,23 +214,27 @@ curl "localhost:3000/candidates/<candidate-id>/recommendations?weightSkills=10&w
 ```
 
 ```json
-[
-  {
-    "jobId": "023fbc7c-392d-4f65-bde7-dc00cc791da6",
-    "title": "Backend Engineer",
-    "score": 71,
-    "breakdown": {
-      "skills": { "score": 35, "max": 50 },
-      "experience": { "score": 8, "max": 20 },
-      "location": { "score": 15, "max": 15 },
-      "salary": { "score": 13, "max": 15 }
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "jobId": "023fbc7c-392d-4f65-bde7-dc00cc791da6",
+      "title": "Backend Engineer",
+      "score": 71,
+      "breakdown": {
+        "skills": { "score": 35, "max": 50 },
+        "experience": { "score": 8, "max": 20 },
+        "location": { "score": 15, "max": 15 },
+        "salary": { "score": 13, "max": 15 }
+      }
     }
-  }
-]
+  ],
+  "message": "Found 1 job recommendation"
+}
 ```
 
-Returns `404` if the candidate doesn't exist, or `400` if `limit` isn't a positive
-integer.
+Returns `404` if the candidate doesn't exist, or `400` if a query param is invalid. The
+existence check runs first, so an unknown id returns `404` even when `limit` is also bad.
 
 ### `GET /jobs/:id/recommendations`
 
@@ -186,22 +250,26 @@ curl "localhost:3000/jobs/<job-id>/recommendations?limit=5"
 ```
 
 ```json
-[
-  {
-    "candidateId": "cebb1f5d-66f8-4b1d-9018-83d171536a9a",
-    "name": "Ada Lovelace",
-    "score": 100,
-    "breakdown": {
-      "skills": { "score": 50, "max": 50 },
-      "experience": { "score": 20, "max": 20 },
-      "location": { "score": 15, "max": 15 },
-      "salary": { "score": 15, "max": 15 }
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "candidateId": "cebb1f5d-66f8-4b1d-9018-83d171536a9a",
+      "name": "Ada Lovelace",
+      "score": 100,
+      "breakdown": {
+        "skills": { "score": 50, "max": 50 },
+        "experience": { "score": 20, "max": 20 },
+        "location": { "score": 15, "max": 15 },
+        "salary": { "score": 15, "max": 15 }
+      }
     }
-  }
-]
+  ],
+  "message": "Found 1 candidate recommendation"
+}
 ```
 
-Returns `404` if the job doesn't exist, or `400` if `limit` isn't a positive integer.
+Returns `404` if the job doesn't exist, or `400` if a query param is invalid.
 
 ## Scoring formula
 

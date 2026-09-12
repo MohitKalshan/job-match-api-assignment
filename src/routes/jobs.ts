@@ -1,51 +1,53 @@
 import { Router } from "express";
 import { createJobSchema } from "../schemas/job.js";
 import { recommendationQuerySchema } from "../schemas/recommendation.js";
-import { createJob, getJobById } from "../store/jobs.js";
-import { listCandidates } from "../store/candidates.js";
+import type { CandidateStore, JobStore } from "../types/store.js";
 import {
   rankCandidatesForJob,
   resolveWeights,
   weightOverridesFromQuery,
 } from "../scoring/job-match.js";
-import { parseOrRespond } from "../utils/validate.js";
+import { NotFoundError } from "../errors/http-errors.js";
+import { respond } from "../utils/respond.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-export const jobsRouter = Router();
+// Takes its stores rather than importing concretes, so the composition root picks the
+// implementation and tests can substitute their own.
+export function createJobsRouter(jobStore: JobStore, candidateStore: CandidateStore): Router {
+  const router = Router();
 
-jobsRouter.post(
-  "/",
-  asyncHandler(async (req, res) => {
-    const data = parseOrRespond(createJobSchema, req.body, res);
-    if (!data) return;
+  router.post(
+    "/",
+    asyncHandler(async (req, res) => {
+      const data = createJobSchema.parse(req.body);
+      const job = jobStore.create(data);
 
-    const job = createJob(data);
-    res.status(201).json(job);
-  }),
-);
+      respond(res, 201, [job], "Job created");
+    }),
+  );
 
-jobsRouter.get(
-  "/:id/recommendations",
-  asyncHandler<{ id: string }>(async (req, res) => {
-    const job = getJobById(req.params.id);
-    if (!job) {
-      res.status(404).json({ error: "Job not found" });
-      return;
-    }
+  router.get(
+    "/:id/recommendations",
+    asyncHandler<{ id: string }>(async (req, res) => {
+      const job = jobStore.getById(req.params.id);
+      if (!job) throw new NotFoundError("Job not found");
 
-    const query = parseOrRespond(recommendationQuerySchema, req.query, res);
-    if (!query) return;
+      const query = recommendationQuerySchema.parse(req.query);
+      const weights = resolveWeights(weightOverridesFromQuery(query));
+      const ranked = rankCandidatesForJob(job, candidateStore.list(), weights).map(
+        ({ candidate, score, breakdown }) => ({
+          candidateId: candidate.id,
+          name: candidate.name,
+          score,
+          breakdown,
+        }),
+      );
+      const results = ranked.slice(0, query.limit);
 
-    const weights = resolveWeights(weightOverridesFromQuery(query));
-    const ranked = rankCandidatesForJob(job, listCandidates(), weights).map(
-      ({ candidate, score, breakdown }) => ({
-        candidateId: candidate.id,
-        name: candidate.name,
-        score,
-        breakdown,
-      }),
-    );
+      const noun = results.length === 1 ? "candidate recommendation" : "candidate recommendations";
+      respond(res, 200, results, `Found ${results.length} ${noun}`);
+    }),
+  );
 
-    res.json(query.limit ? ranked.slice(0, query.limit) : ranked);
-  }),
-);
+  return router;
+}

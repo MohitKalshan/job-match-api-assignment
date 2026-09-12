@@ -70,15 +70,17 @@ function scoreLocation(candidate: Candidate, job: Job): number {
   return 0;
 }
 
-// Full credit at or under the range max; decays linearly to zero 50% over max.
+// Ramps from 0 (max at or below expectation) to full credit once max is 20%+ above expectation.
 function scoreSalary(candidate: Candidate, job: Job): number {
-  const { max } = job.salaryRange;
-  if (candidate.expectedSalary <= max) {
+  const { expectedSalary } = candidate;
+  if (expectedSalary <= 0) {
     return SCORE_WEIGHTS.salary;
   }
-  const overBudgetRatio = (candidate.expectedSalary - max) / max;
-  const OVER_BUDGET_TOLERANCE = 0.5;
-  return SCORE_WEIGHTS.salary * Math.max(0, 1 - overBudgetRatio / OVER_BUDGET_TOLERANCE);
+
+  const COMFORTABLE_MARGIN = 0.2;
+  const marginRatio = (job.salaryRange.max - expectedSalary) / expectedSalary;
+  const normalized = Math.min(Math.max(marginRatio, 0), COMFORTABLE_MARGIN) / COMFORTABLE_MARGIN;
+  return SCORE_WEIGHTS.salary * normalized;
 }
 
 export function computeJobMatch(candidate: Candidate, job: Job): MatchResult {

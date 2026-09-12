@@ -221,13 +221,22 @@ weighted factors. Implementation: `src/scoring/job-match.ts`.
   score there would just be noise. It's weighted below skills and experience because,
   in practice, remote-friendliness is common enough that this factor doesn't
   discriminate between candidates as often as the other two.
-- **Salary (15 pts)** is asymmetric on purpose: if the candidate's expected salary is
-  at or under the job's budget (`salaryRange.max`), that's full credit — including
-  cases where the expectation is below the range minimum, since that's a bonus for the
-  employer, not a mismatch. Above the max, credit decays linearly to zero once the
-  candidate is asking for 50% more than the top of the range, so a candidate slightly
-  over budget still scores reasonably (they might be negotiable) while someone wildly
-  over budget scores near zero.
+- **Salary (15 pts) is a continuous ramp based on headroom, not a flat pass/fail at
+  `salaryRange.max`.** The signal that matters is how much cushion the job's budget
+  has above what the candidate is asking for:
+  - If `max` is at or below the candidate's `expectedSalary` — the job's ceiling
+    can't even meet the ask — the score is 0. This includes the exact-breakeven case
+    (`max == expectedSalary`): meeting the number exactly leaves no room for
+    negotiation, leveling, or a raise, so it scores the same as falling short rather
+    than getting a pass purely for clearing the bar.
+  - Once `max` exceeds `expectedSalary`, the score ramps up linearly with the size of
+    that margin (as a percentage of `expectedSalary`), reaching full credit once `max`
+    is **20% or more above** the expectation — a threshold picked because a
+    20%+ cushion is a "comfortably above" budget by most hiring intuitions, not a
+    precisely derived number. A 10% margin lands roughly at half credit.
+  - `salaryRange.min` isn't part of the formula: a candidate asking for less than the
+    range minimum is still judged purely on how far `max` clears their ask, since the
+    employer's floor doesn't constrain whether they can afford the candidate.
 
 All four sub-scores are rounded to the nearest integer before summing, so the
 `breakdown` values always add up to the displayed `score`.

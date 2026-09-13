@@ -37,7 +37,7 @@ src/
   schemas/     Zod validation schemas — the boundary, validated once
   types/       Types inferred from schemas, plus the store contracts
   scoring/     Match scoring — pure functions, no Express, no I/O
-  store/       In-memory store implementations
+  store/       In-memory stores, backed by a singleton Database (database.ts)
   routes/      Express route handlers (router factories taking their stores)
   middleware/  404 and the single error handler
   errors/      HttpError and its subclasses

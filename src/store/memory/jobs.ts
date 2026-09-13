@@ -1,21 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { Job } from "../types/job.js";
 import type { JobStore } from "../types/store.js";
+import type { Database } from "./database.js";
 
-export function createInMemoryJobStore(): JobStore {
-  const jobs = new Map<string, Job>();
-
+export function createInMemoryJobStore(db: Database): JobStore {
   return {
     create(data) {
       const job: Job = { ...data, id: randomUUID() };
-      jobs.set(job.id, job);
+      db.jobs.set(job.id, job);
       return job;
     },
     getById(id) {
-      return jobs.get(id);
+      return db.jobs.get(id);
     },
     list() {
-      return Array.from(jobs.values());
+      return Array.from(db.jobs.values());
     },
   };
 }

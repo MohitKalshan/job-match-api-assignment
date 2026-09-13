@@ -90,6 +90,15 @@ pnpm dev               # logs "database: postgres" when connected
 
 Variables already set in your shell take precedence over `.env`.
 
+To load sample data (6 candidates and 6 jobs covering every scoring rule) into Postgres:
+
+```bash
+pnpm seed
+```
+
+It skips if the tables already contain data, so running it twice won't create duplicates.
+Inside Docker Compose, run `docker compose exec api node dist/seed.js` instead.
+
 A missing `DATABASE_URL` or unknown `DB_DRIVER` stops the server at startup with a clear
 error.
 

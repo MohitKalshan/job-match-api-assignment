@@ -128,11 +128,6 @@ const jobs = [
   },
 ].map((job) => createJobSchema.parse(job));
 
-if (config.database.DB_DRIVER === "memory") {
-  console.error("Seeding needs a persistent database. Set DB_DRIVER=postgres in .env.");
-  process.exit(1);
-}
-
 const stores = await createStores(config.database);
 
 try {

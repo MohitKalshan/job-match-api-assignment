@@ -13,7 +13,7 @@ This README describes only what is currently implemented. As of now:
 - `GET /candidates/:id/recommendations` — ranked job recommendations for a candidate
 - `GET /jobs/:id/recommendations` — ranked best-fit candidates for a job (reverse view)
 - `GET /` — health check
-- Storage in PostgreSQL or in memory, chosen with `DB_DRIVER`
+- PostgreSQL storage
 - Docker / Docker Compose setup (API + Postgres)
 - Prettier formatting
 
@@ -39,8 +39,7 @@ src/
   types/       Types inferred from schemas, plus the store contracts
   scoring/     Match scoring — pure functions, no Express, no I/O
   config/      Environment variables, parsed and validated once at startup
-  store/       index.ts picks the database from DB_DRIVER
-    memory/    In-memory stores, backed by a singleton MemoryDatabase
+  store/       index.ts sets up the database
     postgres/  Postgres stores, backed by a singleton connection pool
   routes/      Express route handlers (router factories taking their stores)
   middleware/  404 and the single error handler
@@ -56,7 +55,7 @@ doubles via `createApp`.
 
 ## Running locally
 
-Requires Node.js 22+ and pnpm.
+Requires Node.js 22+, pnpm, and a running PostgreSQL database (see Configuration below).
 
 ```bash
 pnpm install
@@ -72,15 +71,14 @@ pnpm start      # runs dist/index.js
 
 ### Configuration
 
-| Variable       | Default  | Purpose                                                        |
-| -------------- | -------- | -------------------------------------------------------------- |
-| `PORT`         | `3000`   | Port the API listens on                                        |
-| `DB_DRIVER`    | `memory` | `memory` or `postgres`                                         |
-| `DATABASE_URL` | none     | Postgres connection string, required when `DB_DRIVER=postgres` |
+| Variable       | Default    | Purpose                                       |
+| -------------- | ---------- | --------------------------------------------- |
+| `PORT`         | `3000`     | Port the API listens on                       |
+| `DB_DRIVER`    | `postgres` | Database driver. Only `postgres` is supported |
+| `DATABASE_URL` | none       | Postgres connection string. Required          |
 
-With no variables set, the API uses in-memory storage, so data is lost on restart. To use
-Postgres, copy `.env.example` to `.env` and set `DATABASE_URL` to a running database.
-`pnpm dev` and `pnpm start` load `.env` automatically, and `.env` is gitignored. The
+Copy `.env.example` to `.env` and set `DATABASE_URL` to a running database. `pnpm dev`,
+`pnpm start` and `pnpm seed` load `.env` automatically, and `.env` is gitignored. The
 tables are created automatically on start.
 
 ```bash
@@ -105,11 +103,10 @@ error.
 ### Database design
 
 Every store implements the same async interfaces in `src/types/store.ts`, so routes and
-scoring never know which database is behind them. Each database connection is a
-singleton: one shared Postgres pool, or one shared in-memory database, for the whole
-process. Adding MongoDB means adding a `src/store/mongo/` folder with stores implementing
-those interfaces, a `mongo` option in `src/config/env.ts`, and a `mongo` case in
-`src/store/index.ts`.
+scoring never know which database is behind them. The database connection is a
+singleton: one shared Postgres pool for the whole process. Adding MongoDB means adding a
+`src/store/mongo/` folder with stores implementing those interfaces, a `mongo` option in
+`src/config/env.ts`, and a branch on `DB_DRIVER` in `src/store/index.ts`.
 
 ### Tests
 
@@ -435,3 +432,130 @@ Per-factor detail:
 All four sub-scores are rounded to the nearest integer before summing, so the
 `breakdown` values add up to the displayed `score`. The total is capped at 100, which only
 matters for unusual custom weights where per-factor rounding could tip it just over.
+
+## Assumptions
+
+The brief left a lot open, which I think was the point. These are the calls I made where
+it didn't say.
+
+**Skills are matched by name, nothing smarter.** "Node.js" and "node.js " count as the
+same skill because I ignore case and surrounding spaces. But "JS" and "JavaScript" are
+different skills, and so are "Node" and "Node.js". There are no synonyms and no skill
+levels, so knowing a skill a little counts the same as knowing it well.
+
+**Experience means total years in the industry.** It isn't tracked per skill. Going past
+the job's minimum earns nothing extra, because the job only asked for a minimum. Half
+years like 2.5 are allowed.
+
+**Locations are plain text.** An exact match means the same city name. I don't know that
+Berlin and Potsdam are close, and there's no geo data in the model to work that out. A
+candidate whose location is "Remote" is treated as a place called "Remote", so they get
+full location points only for jobs listed as "Remote", and remote points for jobs that
+allow remote.
+
+**Salaries are annual, in one currency.** There's no currency conversion. The job's
+`salaryRange.min` doesn't affect the score, as explained in the scoring section. A
+candidate with an expected salary of 0 gets full salary points, since any job pays enough.
+
+**If a job doesn't ask for something, the candidate isn't penalised for it.** A job with
+no must-have skills gives full must-have points, and the same goes for nice-to-have skills
+and a minimum experience of 0.
+
+**Custom weights are relative.** `weightExperience=60` doesn't mean 60 points. The four
+weights are scaled so they always total 100, which keeps the score on the 0–100 scale the
+brief asked for.
+
+**A few smaller decisions:**
+
+- Ids are always generated by the server. If a client sends its own `id`, it's ignored.
+- `limit` defaults to 20 and can't go above 100, so a list request can't return the
+  whole database.
+- When two jobs have the same score, the one created first is listed first.
+- Recommendations are worked out fresh on every request by scoring every job. That's fine
+  at this size, but it wouldn't be at scale (see below).
+- There's no authentication, and no list, update or delete endpoints, since the brief put
+  those out of scope.
+
+## What I'd do differently with more time
+
+**Filter in the database instead of in code.** Right now every recommendation request
+loads every job, then drops the ones missing a must-have skill. With thousands of jobs,
+I'd do that filtering in SQL first and only score what's left.
+
+**Tighten up input validation.** While testing the API, I found a few edge cases I
+deliberately left alone to keep the scope to what the brief asked for:
+
+- Blank strings are accepted. A blank location matches another blank location for full
+  points, and a blank must-have skill can slip through the filter.
+- An empty query param like `?weightSkills=` is read as 0, which quietly removes that
+  factor from the score.
+- A job can list the same skill as both must-have and nice-to-have, which hands out free
+  nice-to-have points.
+- An oversized request body returns a 500 instead of a 413.
+
+None of these come up with normal input, but I'd fix all of them before this went
+anywhere real.
+
+**More tests.** The tests cover the scoring rules, which is where the logic lives. I'd add
+HTTP-level tests for the routes, and tests for the Postgres stores against a real test
+database.
+
+**Fix a rounding quirk.** With some custom weights, the four breakdown maxes add up to
+101 instead of 100, because each is rounded separately. The score itself is always
+correct. A smarter rounding method fixes it, but it didn't seem worth the extra code yet.
+
+**Smarter matching.** A skill synonym list ("JS" means "JavaScript") and proper location
+data would make the results noticeably better than exact text matching.
+
+**Production basics.** Real database migrations instead of creating tables on startup,
+structured logging with request ids, rate limiting, and the MongoDB store the storage layer
+is already set up for.
+
+## Use of AI tools
+
+I used AI tools heavily on this project, and I want to be upfront about how.
+
+**Tools:** Claude Code for most of the work, plus ChatGPT and GitHub Copilot.
+
+**The first version was mostly AI-generated.** That includes the endpoints, the scoring
+logic, and much of the scoring write-up in this README. My part was reviewing it: reading
+the formula, checking that the weights and the reasoning made sense to me, and adjusting
+where they didn't. I can explain and defend every scoring decision in here, but I didn't
+type most of that first draft.
+
+**Later work was done with Claude Code, with me directing it.** That covered the response
+format, error handling, tests, the database layer, Postgres support, and the seed script.
+I checked the results myself by calling the API in Postman and looking at the data in
+pgAdmin.
+
+`claude.md` in the repo root holds the coding conventions Claude Code follows, and
+`design-principles.md` explains how principles like KISS and SOLID apply to this code.
+I left them in so you can see how I set the tools up.
+
+### Where I overrode or changed the AI's suggestions
+
+- **It over-engineered, and I cut it back.** When I asked it to debug the API, it found
+  real edge-case bugs, then added stricter validation, a separate HTTP test setup, an
+  extra TypeScript config for tests, and a more complex rounding method. That was more
+  than the brief asked for. I had it revert everything except the two things the brief
+  actually requires: keeping the score within 0–100 and basic scoring tests. The bugs it
+  found are listed under "What I'd do differently" instead of being silently dropped.
+- **The first custom-weights design broke the brief.** Passing a large weight like
+  `weightSkills=1000` produced a score of 1050, even though the brief says scores are
+  0–100. The original README even described that as intended. Checking the output
+  against the brief caught it, and weights are now scaled to 100.
+- **I chose the simpler rounding and accepted a small quirk.** The exact fix for the
+  breakdown maxes sometimes adding up to 101 was more code than the problem deserved.
+- **I kept the database scope down.** I asked for the storage layer to work with both
+  MongoDB and PostgreSQL, and it offered to build both. I chose Postgres only, since
+  that's what the bonus asks for, and had it structure the code so MongoDB can be added
+  later without touching the routes.
+- **I pushed for a singleton database even though it warned against it.** It pointed out
+  that singletons conflict with the project's own conventions because they're harder to
+  swap out in tests. I still wanted one shared database instance, so we compromised: only
+  the database setup code in `src/store/index.ts` calls `getInstance()`, and the stores
+  receive the database as a parameter.
+- **I set the response format.** Every endpoint returns `statusCode`, `data` and
+  `message`. When it asked whether a single created item should come back as an object or
+  an array, I chose to always use an array so clients can parse every response the same
+  way.

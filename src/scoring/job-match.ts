@@ -18,8 +18,19 @@ const SKILLS_MUST_HAVE_SHARE = 35 / 50;
 const LOCATION_REMOTE_SHARE = 10 / 15;
 
 export function resolveWeights(overrides: ScoreWeightOverrides = {}): ScoreWeights {
-  const skills = overrides.skills ?? DEFAULT_WEIGHTS.skills;
-  const location = overrides.location ?? DEFAULT_WEIGHTS.location;
+  const raw = {
+    skills: overrides.skills ?? DEFAULT_WEIGHTS.skills,
+    experience: overrides.experience ?? DEFAULT_WEIGHTS.experience,
+    location: overrides.location ?? DEFAULT_WEIGHTS.location,
+    salary: overrides.salary ?? DEFAULT_WEIGHTS.salary,
+  };
+
+  // Custom weights are relative: scale them so the four factors total 100, keeping the
+  // score on the required 0–100 scale. The defaults already total 100, so they're unchanged.
+  const total = raw.skills + raw.experience + raw.location + raw.salary;
+  const scale = total > 0 ? 100 / total : 0;
+  const skills = raw.skills * scale;
+  const location = raw.location * scale;
 
   return {
     skills: {
@@ -27,12 +38,12 @@ export function resolveWeights(overrides: ScoreWeightOverrides = {}): ScoreWeigh
       mustHave: skills * SKILLS_MUST_HAVE_SHARE,
       niceToHave: skills * (1 - SKILLS_MUST_HAVE_SHARE),
     },
-    experience: overrides.experience ?? DEFAULT_WEIGHTS.experience,
+    experience: raw.experience * scale,
     location: {
       total: location,
       remoteAllowed: location * LOCATION_REMOTE_SHARE,
     },
-    salary: overrides.salary ?? DEFAULT_WEIGHTS.salary,
+    salary: raw.salary * scale,
   };
 }
 
@@ -136,7 +147,9 @@ export function computeJobMatch(
   const salary = Math.round(scoreSalary(candidate, job, weights));
 
   return {
-    score: skills + experience + location + salary,
+    // Rounding each factor separately can add up to just over 100 with unusual custom
+    // weights, so cap it. With the default weights this never triggers.
+    score: Math.min(skills + experience + location + salary, 100),
     breakdown: {
       skills: { score: skills, max: Math.round(weights.skills.total) },
       experience: { score: experience, max: Math.round(weights.experience) },

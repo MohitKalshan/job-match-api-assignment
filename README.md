@@ -12,7 +12,7 @@ This README describes only what is currently implemented. As of now:
 - `POST /jobs` — create a job posting
 - `GET /candidates/:id/recommendations` — ranked job recommendations for a candidate
 - `GET /jobs/:id/recommendations` — ranked best-fit candidates for a job (reverse view)
-- `GET /home` — health check
+- `GET /` — health check
 - In-memory storage (no database)
 - Docker / Docker Compose setup
 - Prettier formatting
@@ -68,6 +68,12 @@ pnpm start      # runs dist/index.js
 
 The server reads `PORT` from the environment (defaults to `3000`).
 
+### Tests
+
+```bash
+pnpm test          # scoring logic tests (Node's built-in test runner)
+```
+
 ### Formatting
 
 ```bash
@@ -122,13 +128,13 @@ carries one `{ field, message }` object per problem.
 A `500` never leaks internals — the body is always `"Something went wrong"`, with the
 real error logged server-side.
 
-### `GET /home`
+### `GET /`
 
 Health check.
 
 ```bash
-curl localhost:3000/home
-# {"statusCode":200,"data":[],"message":"ok"}
+curl localhost:3000/
+# {"statusCode":200,"data":[],"message":"Server is running"}
 ```
 
 ### `POST /candidates`
@@ -202,9 +208,10 @@ Query params:
   an uncapped list endpoint dumps the whole store.
 - `weightSkills`, `weightExperience`, `weightLocation`, `weightSalary` (optional,
   non-negative numbers) — override the default point budget for that factor (see
-  "Scoring formula" below for the defaults). Any factor left unset keeps its default;
-  the four don't need to add up to 100 — the resulting `score` and each breakdown
-  `max` simply reflect whatever budget you passed in.
+  "Scoring formula" below for the defaults). Any factor left unset keeps its default.
+  The four don't need to add up to 100: they're treated as relative and scaled so they
+  total 100, keeping `score` on its 0–100 scale. For example `weightSkills=1000` gives
+  skills about 95 of the 100 points.
 
 ```bash
 curl "localhost:3000/candidates/<candidate-id>/recommendations?limit=5"
@@ -381,4 +388,5 @@ Per-factor detail:
     employer's floor doesn't constrain whether they can afford the candidate.
 
 All four sub-scores are rounded to the nearest integer before summing, so the
-`breakdown` values always add up to the displayed `score`.
+`breakdown` values add up to the displayed `score`. The total is capped at 100, which only
+matters for unusual custom weights where per-factor rounding could tip it just over.

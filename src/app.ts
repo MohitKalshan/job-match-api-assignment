@@ -20,8 +20,8 @@ export function createApp({ candidateStore, jobStore }: Deps): Express {
   // anything that reads req.body.
   app.use(express.json({ limit: "100kb" }));
 
-  app.get("/home", (_req, res) => {
-    respond(res, 200, [], "ok");
+  app.get("/", (_req, res) => {
+    respond(res, 200, [], "Server is running");
   });
 
   app.use("/candidates", createCandidatesRouter(candidateStore, jobStore));

@@ -1,19 +1,26 @@
-import { z } from "zod";
 import { createApp } from "./app.js";
-import { createInMemoryCandidateStore } from "./store/candidates.js";
-import { createInMemoryJobStore } from "./store/jobs.js";
-import { Database } from "./store/database.js";
+import { config } from "./config/env.js";
+import { createStores } from "./store/index.js";
 
 // The composition root: the only file that picks concrete implementations.
-const db = Database.getInstance();
+const stores = await createStores(config.database);
 
 const app = createApp({
-  candidateStore: createInMemoryCandidateStore(db),
-  jobStore: createInMemoryJobStore(db),
+  candidateStore: stores.candidateStore,
+  jobStore: stores.jobStore,
 });
 
-const port = z.coerce.number().default(3000).parse(process.env.PORT);
-
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+const server = app.listen(config.PORT, () => {
+  console.log(`Server listening on port ${config.PORT} (database: ${config.database.DB_DRIVER})`);
 });
+
+// Stop accepting requests, let in-flight ones finish, then release database connections.
+function shutdown(): void {
+  server.close(async () => {
+    await stores.close();
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

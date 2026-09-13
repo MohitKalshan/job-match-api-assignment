@@ -13,18 +13,19 @@ This README describes only what is currently implemented. As of now:
 - `GET /candidates/:id/recommendations` — ranked job recommendations for a candidate
 - `GET /jobs/:id/recommendations` — ranked best-fit candidates for a job (reverse view)
 - `GET /` — health check
-- In-memory storage (no database)
-- Docker / Docker Compose setup
+- Storage in PostgreSQL or in memory, chosen with `DB_DRIVER`
+- Docker / Docker Compose setup (API + Postgres)
 - Prettier formatting
 
-**Not yet implemented:** `GET`/list/update/delete for candidates and jobs, persistence
-beyond process memory, and auth.
+**Not yet implemented:** `GET`/list/update/delete for candidates and jobs, a MongoDB
+store (the storage layer is built so one can be added), and auth.
 
 ## Tech stack
 
 - Node.js + TypeScript
 - Express 5
 - Zod 4 (validation and type inference)
+- PostgreSQL via `pg`
 - pnpm (package manager)
 - Prettier (formatting)
 - Docker / Docker Compose
@@ -37,7 +38,10 @@ src/
   schemas/     Zod validation schemas — the boundary, validated once
   types/       Types inferred from schemas, plus the store contracts
   scoring/     Match scoring — pure functions, no Express, no I/O
-  store/       In-memory stores, backed by a singleton Database (database.ts)
+  config/      Environment variables, parsed and validated once at startup
+  store/       index.ts picks the database from DB_DRIVER
+    memory/    In-memory stores, backed by a singleton MemoryDatabase
+    postgres/  Postgres stores, backed by a singleton connection pool
   routes/      Express route handlers (router factories taking their stores)
   middleware/  404 and the single error handler
   errors/      HttpError and its subclasses
@@ -66,7 +70,37 @@ pnpm build      # compiles TypeScript to dist/
 pnpm start      # runs dist/index.js
 ```
 
-The server reads `PORT` from the environment (defaults to `3000`).
+### Configuration
+
+| Variable       | Default  | Purpose                                                        |
+| -------------- | -------- | -------------------------------------------------------------- |
+| `PORT`         | `3000`   | Port the API listens on                                        |
+| `DB_DRIVER`    | `memory` | `memory` or `postgres`                                         |
+| `DATABASE_URL` | none     | Postgres connection string, required when `DB_DRIVER=postgres` |
+
+With no variables set, the API uses in-memory storage, so data is lost on restart. To use
+Postgres, copy `.env.example` to `.env` and set `DATABASE_URL` to a running database.
+`pnpm dev` and `pnpm start` load `.env` automatically, and `.env` is gitignored. The
+tables are created automatically on start.
+
+```bash
+cp .env.example .env   # then edit DATABASE_URL
+pnpm dev               # logs "database: postgres" when connected
+```
+
+Variables already set in your shell take precedence over `.env`.
+
+A missing `DATABASE_URL` or unknown `DB_DRIVER` stops the server at startup with a clear
+error.
+
+### Database design
+
+Every store implements the same async interfaces in `src/types/store.ts`, so routes and
+scoring never know which database is behind them. Each database connection is a
+singleton: one shared Postgres pool, or one shared in-memory database, for the whole
+process. Adding MongoDB means adding a `src/store/mongo/` folder with stores implementing
+those interfaces, a `mongo` option in `src/config/env.ts`, and a `mongo` case in
+`src/store/index.ts`.
 
 ### Tests
 
@@ -88,7 +122,9 @@ docker compose up --build
 ```
 
 This builds the image (multi-stage: install deps → compile TypeScript → run compiled
-output on a slim Node runtime) and starts the API on `localhost:3000`.
+output on a slim Node runtime) and starts the API on `localhost:3000` with a Postgres 16
+database. The API waits for Postgres to be ready, and data persists in a Docker volume
+between restarts. Remove the volume too with `docker compose down -v`.
 
 ```bash
 docker compose down

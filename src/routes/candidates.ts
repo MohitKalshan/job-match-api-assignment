@@ -20,7 +20,7 @@ export function createCandidatesRouter(candidateStore: CandidateStore, jobStore:
     "/",
     asyncHandler(async (req, res) => {
       const data = createCandidateSchema.parse(req.body);
-      const candidate = candidateStore.create(data);
+      const candidate = await candidateStore.create(data);
 
       respond(res, 201, [candidate], "Candidate created");
     }),
@@ -29,12 +29,12 @@ export function createCandidatesRouter(candidateStore: CandidateStore, jobStore:
   router.get(
     "/:id/recommendations",
     asyncHandler<{ id: string }>(async (req, res) => {
-      const candidate = candidateStore.getById(req.params.id);
+      const candidate = await candidateStore.getById(req.params.id);
       if (!candidate) throw new NotFoundError("Candidate not found");
 
       const query = recommendationQuerySchema.parse(req.query);
       const weights = resolveWeights(weightOverridesFromQuery(query));
-      const ranked = rankJobsForCandidate(candidate, jobStore.list(), weights).map(
+      const ranked = rankJobsForCandidate(candidate, await jobStore.list(), weights).map(
         ({ job, score, breakdown }) => ({
           jobId: job.id,
           title: job.title,

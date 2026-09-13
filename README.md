@@ -528,9 +528,10 @@ format, error handling, tests, the database layer, Postgres support, and the see
 I checked the results myself by calling the API in Postman and looking at the data in
 pgAdmin.
 
-`claude.md` in the repo root holds the coding conventions Claude Code follows, and
-`design-principles.md` explains how principles like KISS and SOLID apply to this code.
-I left them in so you can see how I set the tools up.
+`claude.md` in the repo root is the set of Node and Express conventions I gave Claude Code
+to follow. It's a general, reusable template rather than a description of this project,
+so its folder layout and commands don't all match this repo. I left it in so
+you can see how I set the tool up.
 
 ### Where I overrode or changed the AI's suggestions
 
